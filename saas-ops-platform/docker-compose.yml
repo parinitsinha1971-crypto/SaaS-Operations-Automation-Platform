@@ -1,0 +1,202 @@
+# SaaS Operations Automation Platform
+#
+#   make init   # creates .env with random secrets (once)
+#   make up     # builds and starts everything
+#
+# Dashboard   http://localhost:8080     Grafana       http://localhost:3000
+# Prometheus  http://localhost:9090     Alertmanager  http://localhost:9093
+name: saas-ops
+
+x-sim: &sim
+  build: ./services/sim
+  image: saas-ops/sim:${TAG:-latest}
+  # Docker's own restart policy is off for monitored services on purpose:
+  # the ops platform detects failures and does the restarting, with backoff
+  # and a circuit breaker. The label is what allows it to touch the container.
+  restart: "no"
+  labels:
+    ops.managed: "true"
+  mem_limit: 384m
+  cpus: 1.0
+  networks: [saas]
+
+services:
+  # ------------------------------------------------------------- simulated SaaS
+  saas-api:
+    <<: *sim
+    container_name: saas-api
+    environment:
+      SERVICE_ROLE: api
+      SERVICE_NAME: saas-api
+      CHAOS_TOKEN: ${CHAOS_TOKEN:?run make init}
+      DISK_QUOTA_MB: 500
+    volumes: [api-data:/data]
+    ports: ["127.0.0.1:8001:8000"]
+
+  saas-web:
+    <<: *sim
+    container_name: saas-web
+    environment:
+      SERVICE_ROLE: web
+      SERVICE_NAME: saas-web
+      API_URL: http://saas-api:8000
+      CHAOS_TOKEN: ${CHAOS_TOKEN:?run make init}
+      DISK_QUOTA_MB: 500
+    volumes: [web-data:/data]
+    ports: ["127.0.0.1:8002:8000"]
+    depends_on: [saas-api]
+
+  saas-db:
+    image: postgres:16-alpine
+    container_name: saas-db
+    restart: "no"
+    labels:
+      ops.managed: "true"
+    environment:
+      POSTGRES_DB: acme
+      POSTGRES_USER: acme
+      POSTGRES_PASSWORD: ${SAAS_DB_PASSWORD:?run make init}
+    volumes: [saas-db-data:/var/lib/postgresql/data]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acme -d acme"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [saas]
+
+  traffic:
+    image: saas-ops/sim:${TAG:-latest}
+    command: ["python", "-m", "sim.traffic"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true   # the image's HTTP healthcheck doesn't apply; this container serves nothing
+    environment:
+      TARGETS: http://saas-api:8000,http://saas-web:8000
+      RPS: ${TRAFFIC_RPS:-6}
+    depends_on: [saas-api, saas-web]
+    networks: [saas]
+
+  # ------------------------------------------------------------- ops platform
+  ops-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ops
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ${OPS_DB_PASSWORD:?run make init}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?run make init}
+    volumes:
+      - ops-db-data:/var/lib/postgresql/data
+      - ./db/ops-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ops -d ops"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [saas]
+
+  # Least-privilege Docker API: only container read + restart/kill. No exec,
+  # no images, no volumes, no networks. The raw socket never reaches the platform.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.4.2
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 1
+      ALLOW_RESTARTS: 1
+      ALLOW_START: 0
+      ALLOW_STOP: 0
+      EXEC: 0
+      IMAGES: 0
+      VOLUMES: 0
+      NETWORKS: 0
+      INFO: 0
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [docker-api]
+
+  ops-platform:
+    build: ./ops-platform
+    image: saas-ops/platform:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://ops:${OPS_DB_PASSWORD}@ops-db:5432/ops
+      DOCKER_HOST: tcp://docker-proxy:2375
+      OPS_RUNTIME: docker
+      OPS_API_KEY: ${OPS_API_KEY:?run make init}
+      OPS_WEBHOOK_TOKEN: ${OPS_WEBHOOK_TOKEN:?run make init}
+      OPS_CHECK_INTERVAL: ${OPS_CHECK_INTERVAL:-10}
+      OPS_REPORT_TIME_UTC: ${OPS_REPORT_TIME_UTC:-00:05}
+      OPS_PUBLIC_URL: ${OPS_PUBLIC_URL:-http://localhost:8080}
+      GRAFANA_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3000}
+      ALERTMANAGER_URL: http://alertmanager:9093
+      SAAS_DB_DSN: postgresql://acme:${SAAS_DB_PASSWORD}@saas-db:5432/acme
+      CHAOS_TOKEN: ${CHAOS_TOKEN}
+      REPORT_WEBHOOK_URL: ${REPORT_WEBHOOK_URL:-}
+    ports: ["8080:8000"]
+    depends_on:
+      ops-db: { condition: service_healthy }
+      docker-proxy: { condition: service_started }
+    networks: [saas, docker-api]
+
+  # ------------------------------------------------------------- observability
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports: ["9090:9090"]
+    networks: [saas]
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    secrets: [webhook_token]
+    ports: ["9093:9093"]
+    networks: [saas]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?run make init}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/saas-ops-overview.json
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["3000:3000"]
+    depends_on: [prometheus, ops-db]
+    networks: [saas]
+
+secrets:
+  webhook_token:
+    file: ./alertmanager/secrets/webhook_token
+
+networks:
+  saas: {}
+  docker-api:
+    internal: true   # the Docker API proxy is unreachable from anything else
+
+volumes:
+  api-data:
+  web-data:
+  saas-db-data:
+  ops-db-data:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

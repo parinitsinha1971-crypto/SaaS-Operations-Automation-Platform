@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # The platform's own view of every service: health, resources, logs, SLOs, incidents.
+  - job_name: ops-platform
+    static_configs:
+      - targets: ["ops-platform:8000"]
+
+  # Each simulated service's request metrics, scraped directly. This is an
+  # independent second opinion: if the ops platform itself dies, these still alert.
+  - job_name: saas-api
+    static_configs:
+      - targets: ["saas-api:8000"]
+        labels: { service: saas-api }
+
+  - job_name: saas-web
+    static_configs:
+      - targets: ["saas-web:8000"]
+        labels: { service: saas-web }
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

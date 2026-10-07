@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Ops console{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="{{ page }}">
+  <header class="top">
+    <a class="brand" href="/">Ops console</a>
+    <nav aria-label="Main">
+      <a href="/" {% if page in ('overview', 'service') %}aria-current="page"{% endif %}>Overview</a>
+      <a href="/incidents" {% if page == 'incidents' %}aria-current="page"{% endif %}>Incidents</a>
+      <a href="/reports" {% if page == 'reports' %}aria-current="page"{% endif %}>Reports</a>
+      <a href="/chaos" {% if page == 'chaos' %}aria-current="page"{% endif %}>Chaos lab</a>
+    </nav>
+    <div class="top-right">
+      <a href="{{ grafana }}" target="_blank" rel="noopener">Grafana</a>
+      <a href="/docs">API</a>
+      <button type="button" class="link" id="key-btn">Set API key</button>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <dialog id="key-dialog">
+    <form method="dialog" id="key-form">
+      <h2>API key</h2>
+      <p>Restarts, chaos experiments and incident actions need the platform API key (<code>OPS_API_KEY</code> in your <code>.env</code>). It's kept in this browser tab only.</p>
+      <label for="key-input">Key</label>
+      <input id="key-input" type="password" autocomplete="off" required>
+      <label for="who-input">Your name, for the audit trail</label>
+      <input id="who-input" type="text" autocomplete="name" placeholder="e.g. sahil">
+      <div class="row-actions">
+        <button type="submit" class="primary">Save key</button>
+        <button type="button" id="key-cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

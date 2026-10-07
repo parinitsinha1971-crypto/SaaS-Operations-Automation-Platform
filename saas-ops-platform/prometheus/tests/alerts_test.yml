@@ -1,0 +1,78 @@
+# promtool test rules prometheus/tests/alerts_test.yml
+rule_files:
+  - ../rules/alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: platform down pages within a minute
+    interval: 15s
+    input_series:
+      - series: 'up{job="ops-platform", instance="ops-platform:8000"}'
+        values: "1 1 0x10"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: OpsPlatformDown
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: OpsPlatformDown
+        exp_alerts:
+          - exp_labels: { severity: critical, service: ops-platform, job: ops-platform, instance: "ops-platform:8000" }
+            exp_annotations:
+              summary: The ops platform is not being scraped
+              description: Monitoring, auto-restart and incident tracking are offline until it comes back.
+
+  - name: fast error-budget burn on a hard outage, nothing while healthy
+    interval: 1m
+    input_series:
+      - series: 'ops_service_up{service="saas-api", job="ops-platform", instance="p"}'
+        values: "1x60 0x30"
+      - series: 'ops_slo_target_ratio{service="saas-api", job="ops-platform", instance="p"}'
+        values: "0.995x90"
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: ErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: ErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels: { severity: critical, service: saas-api, job: ops-platform, instance: p }
+            exp_annotations:
+              summary: "saas-api is burning its error budget 14x too fast"
+
+  - name: restart loop after three automatic restarts in 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'ops_restarts_total{service="saas-web", result="success", initiated_by="auto", job="ops-platform", instance="p"}'
+        values: "0 0 1 1 2 2 3 3 3 3"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RestartLoop
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: RestartLoop
+        exp_alerts:
+          - exp_labels: { severity: critical, service: saas-web, result: success, initiated_by: auto, job: ops-platform, instance: p }
+            exp_annotations:
+              summary: "saas-web was auto-restarted 3 times in 15 minutes"
+
+  - name: 5xx ratio from service metrics
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{service="saas-api", route="/api/v1/orders", method="GET", status="200", job="saas-api", instance="a"}'
+        values: "0+60x20"
+      - series: 'http_requests_total{service="saas-api", route="/api/v1/orders", method="GET", status="500", job="saas-api", instance="a"}'
+        values: "0+20x20"
+    promql_expr_test:
+      - expr: service:http_errors:ratio5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'service:http_errors:ratio5m{service="saas-api"}'
+            value: 0.25
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels: { severity: warning, service: saas-api }
+            exp_annotations:
+              summary: "saas-api is failing 25% of requests"

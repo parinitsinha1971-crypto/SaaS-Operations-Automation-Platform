@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Reports · Ops console{% endblock %}
+{% block content %}
+<section class="summary">
+  <h1>Daily reports</h1>
+  <p class="muted">Generated automatically each day for the previous UTC day. You can also build one for today so far.</p>
+  <div class="row-actions"><button type="button" class="primary" id="gen-report">Generate today's report</button></div>
+</section>
+{% if rows %}
+<table class="table">
+  <thead><tr><th>Day</th><th class="num">Fleet availability</th><th class="num">Incidents</th><th class="num">Restarts</th><th>Highlights</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/reports/{{ r.day }}">{{ r.day }}</a></td>
+    <td class="num">{{ r.fleet_availability|pct(3) }}</td>
+    <td class="num">{{ r.incidents_total }}</td>
+    <td class="num">{{ r.restarts_total }}</td>
+    <td>{{ r.highlights[0] }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No reports yet. The first one is created after the platform has run past midnight UTC, or generate today's now.</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>Ops.reports();</script>{% endblock %}

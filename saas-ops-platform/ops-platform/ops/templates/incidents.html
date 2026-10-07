@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Incidents · Ops console{% endblock %}
+{% block content %}
+<section class="summary">
+  <h1>Incident history</h1>
+  <form class="filters" method="get">
+    <label>Status
+      <select name="status" onchange="this.form.submit()">
+        {% for v in ['all', 'open', 'resolved'] %}<option value="{{ v }}" {% if v == status %}selected{% endif %}>{{ v|capitalize }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Service
+      <select name="service" onchange="this.form.submit()">
+        <option value="">All services</option>
+        {% for s in services %}<option value="{{ s.name }}" {% if s.name == service %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button type="submit">Filter</button></noscript>
+  </form>
+</section>
+{% if rows %}
+<table class="table">
+  <thead><tr><th>Incident</th><th>Service</th><th>Severity</th><th>Opened (UTC)</th><th class="num">Duration</th><th class="num">Restarts</th></tr></thead>
+  <tbody>
+  {% for i in rows %}
+  <tr class="{{ 'is-open' if i.status == 'open' }}">
+    <td><a href="/incidents/{{ i.id }}">{{ i.title }}</a>{% if i.status == 'open' %} <span class="pill open">open</span>{% endif %}</td>
+    <td>{{ i.service }}</td>
+    <td><span class="sev {{ i.severity }}">{{ i.severity }}</span></td>
+    <td class="ts" data-ts="{{ i.opened_at }}">{{ i.opened_at[:19]|replace('T', ' ') }}</td>
+    <td class="num">{{ i.duration_s|dur }}</td>
+    <td class="num">{{ i.restarts }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No incidents match these filters. Try the Chaos lab to cause one on purpose.</p>
+{% endif %}
+{% endblock %}

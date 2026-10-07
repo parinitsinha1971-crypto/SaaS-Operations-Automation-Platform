@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Report {{ r.day }} · Ops console{% endblock %}
+{% block content %}
+<section class="summary">
+  <p class="crumb"><a href="/reports">Reports</a> / {{ r.day }}</p>
+  <h1>{{ r.day }}: fleet availability {{ r.fleet_availability|pct(3) }}</h1>
+  <p class="muted">{{ r.incidents_total }} incidents, {{ r.restarts_total }} restarts, {{ r.alerts_received }} alerts received. {{ r.incidents_open_now }} incidents open when generated.
+    Download as <a href="/api/reports/{{ r.day }}/markdown">Markdown</a> or <a href="/api/reports/{{ r.day }}">JSON</a>.</p>
+  <ul class="highlights">{% for h in r.highlights %}<li>{{ h }}</li>{% endfor %}</ul>
+</section>
+
+<table class="table">
+  <thead><tr><th>Service</th><th class="num">Availability</th><th class="num">SLO</th><th class="num">Downtime</th><th class="num">30-day budget left</th>
+    <th class="num">Incidents</th><th class="num">MTTR</th><th class="num">Auto-restarts</th><th class="num">p95 check latency</th><th class="num">Peak CPU / mem / disk</th></tr></thead>
+  <tbody>
+  {% for x in r.services %}
+  <tr>
+    <td><a href="/services/{{ x.service }}">{{ x.label }}</a></td>
+    <td class="num">{{ x.availability|pct(3) }}</td>
+    <td class="num"><span class="{{ 'ok' if x.slo_met else 'bad' }}">{{ x.slo_target }}% {{ 'met' if x.slo_met else 'missed' }}</span></td>
+    <td class="num">{{ x.downtime_s|dur }}</td>
+    <td class="num">{% if x.error_budget_remaining is none %}n/a{% else %}<span class="{{ 'bad' if x.error_budget_remaining < 0.25 else '' }}">{{ '%.0f'|format(x.error_budget_remaining * 100) }}%</span>{% endif %}</td>
+    <td class="num">{{ x.incidents.total }}</td>
+    <td class="num">{{ x.mttr_s|dur }}</td>
+    <td class="num">{{ x.restarts.success }}{% if x.restarts.failed %} ({{ x.restarts.failed }} failed){% endif %}</td>
+    <td class="num">{{ x.health_latency_p95_ms if x.health_latency_p95_ms is not none else 'n/a' }}{% if x.health_latency_p95_ms is not none %} ms{% endif %}</td>
+    <td class="num">{% for v in [x.cpu_peak, x.memory_peak_pct, x.disk_peak_pct] %}{{ ('%.0f%%'|format(v)) if v is not none else '–' }}{{ ' / ' if not loop.last }}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% for x in r.services if x.top_errors %}
+<section>
+  <h2>Top errors: {{ x.label }}</h2>
+  <table class="table"><thead><tr><th>Pattern</th><th class="num">Count</th></tr></thead><tbody>
+  {% for e in x.top_errors %}<tr><td><code>{{ e.template }}</code></td><td class="num">{{ e.count }}</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endfor %}
+{% endblock %}

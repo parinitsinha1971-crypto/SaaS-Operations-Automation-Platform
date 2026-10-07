@@ -1,0 +1,39 @@
+# Run everything as local processes, no Docker (scripts/dev.sh).
+# Resources come from each service's /health, logs from files. Auto-restart
+# is recorded but can't act without a container runtime.
+defaults: { interval_s: 5, timeout_s: 2, failure_threshold: 3, degraded_threshold: 2, recovery_threshold: 2 }
+anomaly: { enabled: true, warmup_samples: 20 }
+remediation: { enabled: true }
+services:
+  - name: saas-api
+    display_name: API
+    kind: api
+    slo: { availability: 99.5, latency_ms: 250 }
+    checks:
+      - { type: http, name: health, url: "http://127.0.0.1:18001/health" }
+      - { type: tcp, name: port, host: 127.0.0.1, port: 18001 }
+      - { type: api, name: list-orders, url: "http://127.0.0.1:18001/api/v1/orders?limit=1", expect_json_keys: [orders], max_latency_ms: 500 }
+    resources: { cpu_mem: health, disk: health }
+    logs:
+      source: file
+      path: ${DEV_DIR:-.dev}/saas-api.log
+      rules:
+        - { name: fatal, pattern: "CRITICAL|fatal error", severity: critical }
+        - { name: db-timeout, pattern: "database timeout", severity: warning, min_count: 3 }
+    chaos: { enabled: true, url: "http://127.0.0.1:18001" }
+
+  - name: saas-web
+    display_name: Web App
+    kind: web
+    depends_on: [saas-api]
+    slo: { availability: 99.0 }
+    checks:
+      - { type: http, name: health, url: "http://127.0.0.1:18002/health" }
+      - { type: api, name: dashboard, url: "http://127.0.0.1:18002/dashboard", max_latency_ms: 800 }
+    resources: { cpu_mem: health, disk: health }
+    logs:
+      source: file
+      path: ${DEV_DIR:-.dev}/saas-web.log
+      rules:
+        - { name: upstream, pattern: "upstream api", severity: warning, min_count: 3 }
+    chaos: { enabled: true, url: "http://127.0.0.1:18002" }

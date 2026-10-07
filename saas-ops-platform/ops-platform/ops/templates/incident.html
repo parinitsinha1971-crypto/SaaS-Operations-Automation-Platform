@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}#{{ inc.id }} {{ inc.title }} · Ops console{% endblock %}
+{% block content %}
+<section class="summary">
+  <p class="crumb"><a href="/incidents">Incidents</a> / #{{ inc.id }}</p>
+  <h1>{{ inc.title }}</h1>
+  <p class="muted">
+    <span class="sev {{ inc.severity }}">{{ inc.severity }}</span>
+    {% if inc.status == 'open' %}<span class="pill open">open for {{ inc.duration_s|dur }}</span>
+    {% else %}resolved after {{ inc.duration_s|dur }}{% endif %}
+    on <a href="/services/{{ inc.service }}">{{ inc.service }}</a>
+    {% if inc.acknowledged_by %}, acknowledged by {{ inc.acknowledged_by }}{% endif %}
+  </p>
+  {% if inc.root_cause_hint %}<p class="hint"><strong>Likely cause:</strong> {{ inc.root_cause_hint }}</p>{% endif %}
+  {% if inc.status == 'open' %}
+  <div class="row-actions">
+    <button type="button" data-inc-action="ack" data-id="{{ inc.id }}" {% if inc.acknowledged_by %}disabled{% endif %}>Acknowledge</button>
+    <button type="button" data-inc-action="resolve" data-id="{{ inc.id }}">Resolve manually</button>
+    <button type="button" class="primary" data-restart="{{ inc.service }}">Restart {{ inc.service }}</button>
+  </div>
+  {% endif %}
+</section>
+
+<section aria-labelledby="tl-h">
+  <h2 id="tl-h">Timeline</h2>
+  <ol class="timeline">
+    {% for e in inc.events %}
+    <li class="ev ev-{{ e.type }}">
+      <time class="ts" data-ts="{{ e.ts }}">{{ e.ts[11:19] }}</time>
+      <span class="ev-type">{{ e.type|replace('_', ' ') }}</span>
+      <span class="ev-msg">{{ e.message }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+  <form class="note" data-note="{{ inc.id }}">
+    <label for="note">Add a note</label>
+    <textarea id="note" name="text" rows="2" required placeholder="What you checked, what you changed"></textarea>
+    <button type="submit">Add note</button>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script>Ops.incident();</script>{% endblock %}

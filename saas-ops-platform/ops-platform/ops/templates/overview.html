@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Overview · Ops console{% endblock %}
+{% block content %}
+<section class="summary">
+  <h1 id="headline">Checking services…</h1>
+  <p id="subline" class="muted"></p>
+</section>
+
+<section aria-labelledby="svc-h">
+  <h2 id="svc-h" class="sr-only">Services</h2>
+  <div class="board" id="board">
+    {% for s in services %}
+    <div class="svc-row" data-service="{{ s.name }}"><span class="svc-name">{{ s.label }}</span><span class="muted">waiting for first check</span></div>
+    {% endfor %}
+  </div>
+  <p class="legend muted">Each tick is one check cycle, oldest on the left.
+    <span class="key healthy">healthy</span> <span class="key degraded">degraded</span> <span class="key down">down</span></p>
+</section>
+
+<div class="split">
+  <section aria-labelledby="inc-h">
+    <h2 id="inc-h">Open incidents</h2>
+    <ul class="feed" id="open-incidents"><li class="muted">None.</li></ul>
+  </section>
+  <section aria-labelledby="act-h">
+    <h2 id="act-h">What the platform did</h2>
+    <ul class="feed" id="actions"><li class="muted">No automated actions yet.</li></ul>
+  </section>
+</div>
+
+<footer class="agent muted" id="agent"></footer>
+{% endblock %}
+{% block scripts %}<script>Ops.overview();</script>{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ svc.label }} · Ops console{% endblock %}
+{% block content %}
+<section class="summary">
+  <p class="crumb"><a href="/">Overview</a> / {{ svc.label }}</p>
+  <h1><span id="svc-title">{{ svc.label }}</span> <span class="state-word" id="svc-state">…</span></h1>
+  <p id="svc-sub" class="muted"></p>
+  <div class="row-actions">
+    <button type="button" class="primary" id="restart-btn" {% if not svc.container %}disabled title="No container configured"{% endif %}>Restart {{ svc.label }}</button>
+    <button type="button" id="resume-btn" hidden>Resume auto-restart</button>
+  </div>
+</section>
+
+<div class="ribbon-wrap"><div class="ribbon big" id="ribbon"></div></div>
+
+<div class="charts" id="charts">
+  <figure><figcaption>Health check latency</figcaption><div class="chart" data-metric="latency_ms" data-unit="ms"></div></figure>
+  <figure><figcaption>CPU</figcaption><div class="chart" data-metric="cpu" data-unit="%"></div></figure>
+  <figure><figcaption>Memory</figcaption><div class="chart" data-metric="mem_pct" data-unit="%" data-alt="mem_bytes"></div></figure>
+  <figure><figcaption>API p95 latency (from logs)</figcaption><div class="chart" data-metric="p95_ms" data-unit="ms"></div></figure>
+</div>
+
+<div class="split">
+  <section aria-labelledby="checks-h">
+    <h2 id="checks-h">Checks</h2>
+    <table class="table" id="checks"><thead><tr><th>Check</th><th>Type</th><th>Result</th><th class="num">Latency</th></tr></thead><tbody></tbody></table>
+    <h2>Why it's in this state</h2>
+    <ul class="feed" id="reasons"></ul>
+  </section>
+  <section aria-labelledby="res-h">
+    <h2 id="res-h">Resources</h2>
+    <dl class="facts" id="resources"></dl>
+    <h2>Auto-restart</h2>
+    <dl class="facts" id="remediation"></dl>
+  </section>
+</div>
+
+<section aria-labelledby="logs-h">
+  <h2 id="logs-h">Top errors today</h2>
+  <p class="muted">Similar lines are grouped: numbers, ids and quoted values are replaced with <code>&lt;*&gt;</code>.</p>
+  <table class="table" id="sigs"><thead><tr><th>Error pattern</th><th class="num">Count</th><th>Last seen</th></tr></thead><tbody></tbody></table>
+</section>
+
+<div class="split">
+  <section><h2>Incidents</h2><ul class="feed" id="svc-incidents"></ul></section>
+  <section><h2>Restarts</h2><ul class="feed" id="svc-actions"></ul></section>
+</div>
+{% endblock %}
+{% block scripts %}<script>Ops.service({{ svc.name|tojson }});</script>{% endblock %}

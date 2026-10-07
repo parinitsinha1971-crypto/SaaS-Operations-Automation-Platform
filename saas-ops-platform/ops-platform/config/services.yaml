@@ -1,0 +1,105 @@
+# Monitored services. ${VAR} and ${VAR:-default} are expanded from the environment.
+#
+# Check types
+#   http      GET a URL, expect a status code                     (critical by default)
+#   api       call a business endpoint, assert JSON keys + latency (non-critical by default)
+#   tcp       open a TCP connection to host:port                   (critical by default)
+#   postgres  connect and run a query, also reports DB size        (critical by default)
+#
+# A failing critical check -> DOWN. A failing non-critical check, slow API,
+# resource pressure, log burst or anomaly -> DEGRADED.
+
+defaults:
+  interval_s: ${OPS_CHECK_INTERVAL:-10}
+  timeout_s: 3
+  failure_threshold: 3    # 3 failed cycles (~30s) before DOWN
+  degraded_threshold: 2
+  recovery_threshold: 2
+
+thresholds:
+  cpu_percent:        { warn: 80, crit: 95 }     # 100 = one full core
+  memory_percent:     { warn: 80, crit: 92 }     # of the container's memory limit
+  disk_percent:       { warn: 80, crit: 90 }     # of the service's disk quota
+  log_errors_per_min: { warn: 10, crit: 60 }
+  api_error_ratio:    { warn: 0.05, crit: 0.25 }
+  sustain_samples: 3
+
+anomaly:
+  enabled: true
+  z_threshold: 3.5
+  warmup_samples: 30      # ~5 minutes of baseline before it can fire
+  alpha: 0.05
+  sustain_samples: 2
+
+remediation:
+  enabled: true
+  max_restarts: 3         # then the circuit opens and a human is paged
+  window_minutes: 15
+  backoff_s: [0, 30, 120]
+  grace_s: 20
+  restart_on: [down, memory_critical, exited]
+
+host_disk_paths: ["/"]
+
+services:
+  - name: saas-api
+    display_name: API
+    kind: api
+    container: saas-api
+    slo: { availability: 99.5, latency_ms: 250 }
+    checks:
+      - { type: http, name: health, url: "http://saas-api:8000/health" }
+      - { type: tcp, name: port, host: saas-api, port: 8000 }
+      - type: api
+        name: list-orders
+        url: "http://saas-api:8000/api/v1/orders?limit=1"
+        expect_json_keys: [orders, total]
+        max_latency_ms: 500
+      - type: api
+        name: current-user
+        url: "http://saas-api:8000/api/v1/users/me"
+        expect_json_keys: [id, plan]
+        max_latency_ms: 300
+    resources: { cpu_mem: docker, disk: health }
+    logs:
+      source: docker
+      rules:
+        - { name: fatal, pattern: "CRITICAL|fatal error", severity: critical }
+        - { name: db-timeout, pattern: "database timeout", severity: warning, min_count: 3 }
+        - { name: pool-exhausted, pattern: "connection pool exhausted", severity: warning, min_count: 2 }
+    chaos: { enabled: true, url: "http://saas-api:8000" }
+
+  - name: saas-web
+    display_name: Web App
+    kind: web
+    container: saas-web
+    depends_on: [saas-api]
+    slo: { availability: 99.0, latency_ms: 400 }
+    checks:
+      - { type: http, name: health, url: "http://saas-web:8000/health" }
+      - { type: tcp, name: port, host: saas-web, port: 8000 }
+      - { type: api, name: home-page, url: "http://saas-web:8000/", max_latency_ms: 500 }
+      - { type: api, name: dashboard, url: "http://saas-web:8000/dashboard", max_latency_ms: 800 }
+    resources: { cpu_mem: docker, disk: health }
+    logs:
+      source: docker
+      rules:
+        - { name: fatal, pattern: "CRITICAL|fatal error", severity: critical }
+        - { name: upstream, pattern: "upstream api (request failed|unreachable)", severity: warning, min_count: 3 }
+    chaos: { enabled: true, url: "http://saas-web:8000" }
+
+  - name: saas-db
+    display_name: Database
+    kind: database
+    container: saas-db
+    slo: { availability: 99.9 }
+    checks:
+      - { type: tcp, name: port, host: saas-db, port: 5432 }
+      - { type: postgres, name: query, dsn_env: SAAS_DB_DSN, query: "SELECT 1" }
+    resources: { cpu_mem: docker, disk: postgres, disk_quota_mb: 1024 }
+    logs:
+      source: docker
+      rules:
+        - { name: fatal, pattern: "FATAL|PANIC", severity: critical }
+        - { name: too-many-connections, pattern: "too many clients|remaining connection slots", severity: critical }
+    chaos: { enabled: true }   # no HTTP chaos endpoint; the container can be killed

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Chaos lab · Ops console{% endblock %}
+{% block content %}
+<section class="summary">
+  <h1>Chaos lab</h1>
+  <p class="muted measure">Break a service on purpose and watch the platform detect it, open an incident, alert and restart. Timed faults clear themselves; crash and hang need a restart, which the platform should do for you within about 30 seconds.</p>
+</section>
+<div id="chaos"></div>
+{% endblock %}
+{% block scripts %}<script>Ops.chaos();</script>{% endblock %}

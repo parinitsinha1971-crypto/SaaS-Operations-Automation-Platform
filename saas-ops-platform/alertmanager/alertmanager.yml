@@ -1,0 +1,49 @@
+# Every alert, from Prometheus rules or from the ops platform, is routed here.
+# The default receiver posts back to the platform, which records it and turns
+# Prometheus-rule alerts into incidents. Add Slack / PagerDuty / email below.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: ops-platform
+  group_by: [alertname, service]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: ops-platform
+      repeat_interval: 1h
+      continue: false
+    # Example: page on critical, chat on warning.
+    # - matchers: [severity="critical"]
+    #   receiver: pagerduty
+    # - matchers: [severity="warning"]
+    #   receiver: slack
+
+inhibit_rules:
+  # A critical alert silences the warning version of the same problem.
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname, service]
+  # When the platform itself is down, its stale view shouldn't page anyone twice.
+  - source_matchers: [alertname="OpsPlatformDown"]
+    target_matchers: [source="ops-platform"]
+
+receivers:
+  - name: ops-platform
+    webhook_configs:
+      - url: http://ops-platform:8000/api/alerts/webhook
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/webhook_token
+
+  # - name: slack
+  #   slack_configs:
+  #     - api_url_file: /run/secrets/slack_webhook
+  #       channel: "#ops-alerts"
+  #       send_resolved: true
+  #       title: '{{ .CommonLabels.severity | toUpper }}: {{ .CommonAnnotations.summary }}'
+  #       text: '{{ range .Alerts }}{{ .Annotations.description }} {{ .Annotations.runbook_url }}{{ "\n" }}{{ end }}'

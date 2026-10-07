@@ -1,0 +1,119 @@
+# Prometheus alert rules. These complement the platform's own incidents:
+# the platform alerts on what it observes (down, resources, logs, anomalies);
+# these rules watch the platform itself, request-level metrics scraped
+# straight from the services, and SLO burn rates.
+groups:
+  - name: watch-the-watcher
+    rules:
+      - alert: OpsPlatformDown
+        expr: up{job="ops-platform"} == 0
+        for: 1m
+        labels: { severity: critical, service: ops-platform }
+        annotations:
+          summary: The ops platform is not being scraped
+          description: Monitoring, auto-restart and incident tracking are offline until it comes back.
+
+      - alert: MonitorLoopStalled
+        expr: time() - ops_monitor_last_cycle_timestamp > 90
+        for: 1m
+        labels: { severity: critical, service: ops-platform }
+        annotations:
+          summary: The monitoring loop has not completed a cycle for over 90s
+
+      - alert: ScrapeTargetDown
+        expr: up{job=~"saas-.*"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.service }}"
+          description: Independent of the ops platform; if this fires alone, check the platform too.
+
+  - name: service-requests
+    rules:
+      - record: service:http_requests:rate5m
+        expr: sum by (service) (rate(http_requests_total{route!~"/health|/ready|/metrics|/chaos.*"}[5m]))
+
+      - record: service:http_errors:ratio5m
+        expr: |
+          sum by (service) (rate(http_requests_total{status=~"5..", route!~"/health|/ready|/metrics|/chaos.*"}[5m]))
+          /
+          sum by (service) (rate(http_requests_total{route!~"/health|/ready|/metrics|/chaos.*"}[5m]))
+
+      - record: service:http_latency:p95_5m
+        expr: |
+          histogram_quantile(0.95,
+            sum by (service, le) (rate(http_request_duration_seconds_bucket{route!~"/health|/ready|/metrics|/chaos.*"}[5m])))
+
+      - alert: HighErrorRate
+        expr: service:http_errors:ratio5m > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} is failing {{ $value | humanizePercentage }} of requests"
+
+      - alert: HighErrorRateCritical
+        expr: service:http_errors:ratio5m > 0.25
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service }} is failing {{ $value | humanizePercentage }} of requests"
+
+      - alert: HighLatencyP95
+        expr: service:http_latency:p95_5m > 0.5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} p95 latency is {{ $value | humanizeDuration }}"
+
+  - name: slo-burn
+    # Multi-window burn-rate alerts (Google SRE workbook): fire fast on a burn that would
+    # empty the 30-day budget in ~2 days, slower on one that would empty it in ~5 days.
+    rules:
+      - alert: ErrorBudgetFastBurn
+        expr: |
+          (1 - avg_over_time(ops_service_up[1h])) / (1 - ops_slo_target_ratio) > 14.4
+          and
+          (1 - avg_over_time(ops_service_up[5m])) / (1 - ops_slo_target_ratio) > 14.4
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service }} is burning its error budget 14x too fast"
+
+      - alert: ErrorBudgetSlowBurn
+        expr: |
+          (1 - avg_over_time(ops_service_up[6h])) / (1 - ops_slo_target_ratio) > 6
+          and
+          (1 - avg_over_time(ops_service_up[30m])) / (1 - ops_slo_target_ratio) > 6
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} is burning its error budget 6x too fast"
+
+      - alert: ErrorBudgetExhausted
+        expr: ops_error_budget_remaining_ratio < 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} has spent its 30-day error budget"
+
+  - name: automation
+    rules:
+      - alert: RestartLoop
+        expr: increase(ops_restarts_total{result="success", initiated_by="auto"}[15m]) >= 3
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service }} was auto-restarted {{ $value | humanize }} times in 15 minutes"
+
+      - alert: RestartFailing
+        expr: increase(ops_restarts_total{result="failed"}[10m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Restarting {{ $labels.service }} is failing"
+          description: Check the docker-proxy container and the ops.managed label.
+
+      - alert: HostDiskAlmostFull
+        expr: ops_host_disk_used_percent > 90
+        for: 10m
+        labels: { severity: warning, service: host }
+        annotations:
+          summary: "Host disk {{ $labels.path }} is {{ $value | humanize }}% full"
